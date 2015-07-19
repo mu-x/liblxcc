@@ -1,62 +1,67 @@
 #!/usr/bin/python
 '''PyBLD -- C++ Build System ;)
+
+Usage: bybld [VARIABLE_NAME=VALUE ...] [target]
 '''
 
 import os
 
+from subprocess import check_call as run
 from glob import glob
-from subprocess import Popen, PIPE
 
-VERBOSE = True
+TARGETS = {} # all build targets
+OPTIONS = {} # global options override
 
-DEFAULTS = dict(
-    compiler = 'g++',
-    flags = ['-std=c++11', '-Wall'],
-    libs = [],
-    isLib = False,
-    libFlags = ['-shared', '-fPIC'],
-    source = '',
-    files = '*.cpp',
-    output = './build',
-)
+def target(name, make, **opts)
+    '''Registers target [name] to call [make] with [opts]
+    '''
+    for key, value in opts.items:
+        if not isinstance(opt, list): opts[key] = value
+        else: opts[key] = values + opts.get(key, [])
+    TARGET[name] = lambda: make(opts)
 
-class Error(Exception):
-    pass
+def pfix(prefix, items): return list(prefix + i for i in items)
 
-class Target(object):
-    def __init__(self, source='', **info):
-        self.__dict__.update(**DEFAULTS)
-        self.__dict__.update(**info)
-        self.sources = glob(os.path.join(source, self.files))
-        self.name = getattr(self, 'name', source or 'noname')
-        if self.isLib:
-            self.flags += self.libFlags
-            self.name = 'lib%s.so' % self.name
-        self.target = os.path.join(self.output, self.name)
+def cxx(cxx='g++', flags=[], libdir=[], includes=[], libs=[], srcs=[],
+        target='a.out', output='build', **more):
+    for t in libs: TARGETS.get(t, lambda: 0)()
+    if not os.path.exists(output): os.makedirs(output)
+    run([cxx] + flags + pfix('-L', libdirs + output) + pfix('-l', libs) + \
+        pfix('-I', includes) + srcs + ['-o', os.path.join(output, target)])
 
-    def command(self):
-        return [self.compiler] + self.flags + \
-            ['-l' + lib for lib in self.libs] + \
-            self.sources + ['-o', self.target]
+def cxx_so(target, **opts):
+    opts['flags'] += ['-shared', '-fPIC']
+    opts['target'] = 'lib%s.so' % target
+    make_cxx(**opts)
 
-    def build(self):
-        if not os.path.exists(self.output):
-            os.makedirs(self.output)
-        cmd = self.command()
-        if VERBOSE: print 'Building', self.name, '...'
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
-        out, err = proc.communicate()
-        if proc.returncode:
-            line = ' '.join(["'%s'" % i if ' ' in i else i for i in cmd])
-            raise Error('\n'.join(
-                ['Could not build: ' + self.name, 'Command: ' + line] +
-                (['', out] if out else []) + (['', err] if err else [])))
+def cxx_gtest(**opts):
+    opts['libs'] += ['gtest', 'gtest_main']
+    make_cxx(**opts)
+
+def target_cxx(name, make=cxx, mask='*.cpp', **opts):
+    opts['srcs'] = glob(os.path.join(name.replace('-', os.path.sep), mask))
+    target(name, make, **opts)
+
+def target_test(name, binary, **opts):
+    def make(opts):
+        TARGETS.get(binary, lambda: 0)()
+        run(binary)
+    target(name, make, **opts)
+
+def target_list(name, targets, **opts):
+    target(name, lambda opts: (t() for t in targets), **opts)
 
 if __name__ == '__main__':
-    try:
-        Target('lxcc', isLib=True, libs=['pthread']).build()
-        print 'Done!'
-    except Error, e:
-        print e
+    targets = []
+    for arg in sys.argv:
+        param = arg.split('=')
+        if len(param) == 2:
+            if ',' not in param[1]: OPTIONS[param[0]] = param[1]
+            else: OPTIONS[param[0]] = param[1].split(',')
+        else:
+            targets.append(arg)
 
-
+    target_cxx('lxcc', cxx_so)
+    target_cxx('lxcc-test', cxx_gtest, libs=['lxcc'])
+    target_test('lxcc-runtest', 'lxcc-test')
+    for t in targets:
